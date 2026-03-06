@@ -82,7 +82,48 @@ class Max30102HeartMonitor():
         return reading > self.ATTACHED_IR_THRESHOLD
         
     def get_heart_rate(self) -> int: 
-        return 0
+        if self.count < 30:
+            return 0
+
+        ir = numpy.array(self._valid_ir(), dtype=float)
+
+        # Remove DC component
+        ir = ir - numpy.mean(ir)
+
+        # Simple smoothing
+        kernel = numpy.ones(5) / 5
+        ir = numpy.convolve(ir, kernel, mode="same")
+
+        # Dynamic threshold: only keep strong peaks
+        threshold = numpy.mean(ir) + 0.5 * numpy.std(ir)
+
+        peaks: list[int] = []
+        min_distance = int(self.sample_rate * 0.4)  # max ~150 BPM
+
+        for i in range(1, len(ir) - 1):
+            is_peak = ir[i] > ir[i - 1] and ir[i] > ir[i + 1]
+            strong_enough = ir[i] > threshold
+            far_enough = not peaks or (i - peaks[-1]) >= min_distance
+
+            if is_peak and strong_enough and far_enough:
+                peaks.append(i)
+
+        if len(peaks) < 2:
+            return 0
+
+        intervals = numpy.diff(peaks) / self.sample_rate
+        mean_interval = numpy.mean(intervals)
+
+        if mean_interval <= 0:
+            return 0
+
+        bpm = 60.0 / mean_interval
+
+        # Sanity filter
+        if bpm < 30 or bpm > 220:
+            return 0
+
+        return int(round(bpm))
 
     # AI generated because I have no idea how to calculate SpO2
     def get_spo2(self) -> float:
