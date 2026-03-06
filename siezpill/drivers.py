@@ -44,14 +44,15 @@ class Max30102HeartMonitor():
     # attached or not.
     ATTACHED_IR_PERCENTILE: int = 10
 
-    def __init__(self, window: int = 100, channel: int = 1, address: int = 0x57) -> None:
+    def __init__(self, window: int = 100, sample_rate = 100, channel: int = 1, address: int = 0x57) -> None:
         self.sensor = max30102.MAX30102(channel, address)
         self.window = window
+        self.sample_rate = sample_rate
 
         # Samples are buffers for red and ir light readings,
         # the are written to using a pointer to optimize memory allocations.
-        self.red_sample = [0 for _ in range(window)]
-        self.ir_sample = [0 for _ in range(window)]
+        self.red_sample = [0] * window
+        self.ir_sample = [0] * window
         self.pointer = 0
         self.count = 0
     
