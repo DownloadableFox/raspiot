@@ -36,8 +36,8 @@ class HeartMonitor(Protocol):
     def get_spo2(self) -> float: ...
 
 class Max30102HeartMonitor():
-    # If the sensor is't attached, the IR reading should
-    # be bellow this threshold.
+    # If the sensor isn't attached, the IR reading should
+    # be below this threshold.
     ATTACHED_IR_THRESHOLD: int  = 50_000
 
     # The percentile used to detect if the sensor is
@@ -50,7 +50,7 @@ class Max30102HeartMonitor():
         self.sample_rate = sample_rate
 
         # Samples are buffers for red and ir light readings,
-        # the are written to using a pointer to optimize memory allocations.
+        # they are written to using a pointer to optimize memory allocations.
         self.red_sample = [0] * window
         self.ir_sample = [0] * window
         self.pointer = 0
@@ -69,18 +69,26 @@ class Max30102HeartMonitor():
             self.pointer = (self.pointer + 1) % self.window
             self.count = min(self.count + 1, self.window)
     
+    def _valid_samples(self) -> tuple[list[int], list[int]]:
+        if self.count < self.window:
+            return self.red_sample[:self.count], self.ir_sample[:self.count]
+        else:
+            red = self.red_sample[self.pointer:] + self.red_sample[:self.pointer]
+            ir  = self.ir_sample[self.pointer:]  + self.ir_sample[:self.pointer]
+            return red, ir
+
     def _valid_red(self) -> list[int]:
-        return self.red_sample[:self.count]
+        return self._valid_samples()[0]
 
     def _valid_ir(self) -> list[int]:
-        return self.ir_sample[:self.count]
+        return self._valid_samples()[1]
 
     def is_attached(self) -> bool:
         if self.count < self.window * 0.10:
-            return 0.0
+            return False
         
         reading = numpy.percentile(self._valid_ir(), self.ATTACHED_IR_PERCENTILE)
-        return reading > self.ATTACHED_IR_THRESHOLD
+        return bool(reading > self.ATTACHED_IR_THRESHOLD)
         
     def get_heart_rate(self) -> int: 
         if self.count < 30:
@@ -91,8 +99,12 @@ class Max30102HeartMonitor():
         # Remove DC component
         ir = ir - numpy.mean(ir)
 
-        # Simple smoothing
-        kernel = numpy.ones(5) / 5
+        # Smoothing: wider kernel (size ~sample_rate/10) handles 100 Hz better than fixed 5
+        kernel_size = max(5, self.sample_rate // 10)
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # Keep odd for symmetric smoothing
+            
+        kernel = numpy.ones(kernel_size) / kernel_size
         ir = numpy.convolve(ir, kernel, mode="same")
 
         # Dynamic threshold: only keep strong peaks
@@ -126,7 +138,6 @@ class Max30102HeartMonitor():
 
         return int(round(bpm))
 
-    # AI generated because I have no idea how to calculate SpO2
     def get_spo2(self) -> float:
         if self.count < self.window * 0.10:
             return 0.0
@@ -134,13 +145,20 @@ class Max30102HeartMonitor():
         red = numpy.array(self._valid_red(), dtype=float)
         ir = numpy.array(self._valid_ir(), dtype=float)
 
-        # DC component = moving average (baseline)
+        # DC component = mean baseline
         red_dc = numpy.mean(red)
         ir_dc = numpy.mean(ir)
 
-        # AC component = signal minus baseline
-        red_ac = numpy.std(red)
-        ir_ac = numpy.std(ir)
+        if red_dc == 0 or ir_dc == 0:
+            return 0.0
+
+        # AC component = peak-to-peak amplitude of the pulsatile signal,
+        # not std dev — std dev underestimates the true AC swing.
+        red_ac = numpy.max(red) - numpy.min(red)
+        ir_ac  = numpy.max(ir)  - numpy.min(ir)
+
+        if ir_ac == 0:
+            return 0.0
 
         # Ratio of ratios
         r = (red_ac / red_dc) / (ir_ac / ir_dc)
