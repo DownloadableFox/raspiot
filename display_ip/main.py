@@ -24,7 +24,6 @@ def loop():
         driver.print((0, 0), "IP: " + address)
     else:
         print("Not connected")
-
     
     time.sleep(5000)
 
