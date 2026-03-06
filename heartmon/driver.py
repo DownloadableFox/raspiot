@@ -48,6 +48,7 @@ class MAX30102():
         self.channel = channel
         self.bus = smbus.SMBus(self.channel)
 
+        sleep(0.1)
         self.reset()
 
         sleep(1)  # wait 1 sec
