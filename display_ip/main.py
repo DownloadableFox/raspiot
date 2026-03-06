@@ -23,8 +23,9 @@ def loop():
     if address:
         driver.print((0, 0), "IP: " + address)
     else:
-        print("Not connected")
+        driver.print((0, 0), "Not connected")
     
+    driver.flush()
     time.sleep(5)
 
 if __name__ == "__main__":
