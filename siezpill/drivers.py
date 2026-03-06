@@ -75,6 +75,9 @@ class Max30102HeartMonitor():
         return self.ir_sample[:self.count]
 
     def is_attached(self) -> bool:
+        if self.count < self.window * 0.10:
+            return 0.0
+        
         reading = numpy.percentile(self._valid_ir(), self.ATTACHED_IR_PERCENTILE)
         return reading > self.ATTACHED_IR_THRESHOLD
         

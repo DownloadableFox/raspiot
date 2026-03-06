@@ -6,7 +6,7 @@ heart_monitor: drivers.HeartMonitor = drivers.Max30102HeartMonitor()
 
 def setup():
     i2c_manager.register(heart_monitor)
-    
+
     print("Setting up I2C devices...")
     i2c_manager.setup()
 
