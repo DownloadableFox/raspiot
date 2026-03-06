@@ -50,10 +50,11 @@ class Max30102HeartMonitor():
 
         # Samples are buffers for red and ir light readings,
         # the are written to using a pointer to optimize memory allocations.
-        self.red_sample = [(0, 0) for _ in range(window)]
-        self.ir_sample = [(0, 0) for _ in range(window)]
+        self.red_sample = [0 for _ in range(window)]
+        self.ir_sample = [0 for _ in range(window)]
         self.pointer = 0
-
+        self.count = 0
+    
     def setup(self) -> None:
         pass # No setup needed
 
@@ -65,18 +66,28 @@ class Max30102HeartMonitor():
             self.red_sample[self.pointer] = red
             self.ir_sample[self.pointer] = ir
             self.pointer = (self.pointer + 1) % self.window
+            self.count = min(self.count + 1, self.window)
+    
+    def _valid_red(self) -> list[int]:
+        return self.red_sample[:self.count]
+
+    def _valid_ir(self) -> list[int]:
+        return self.ir_sample[:self.count]
 
     def is_attached(self) -> bool:
-        reading = numpy.percentile(self.ir_sample, self.ATTACHED_IR_PERCENTILE)
+        reading = numpy.percentile(self._valid_ir(), self.ATTACHED_IR_PERCENTILE)
         return reading > self.ATTACHED_IR_THRESHOLD
         
     def get_heart_rate(self) -> int: 
         return 0
 
     # AI generated because I have no idea how to calculate SpO2
-    def get_spo2(self) -> float: 
-        red = numpy.array(self.red_sample, dtype=float)
-        ir = numpy.array(self.ir_sample, dtype=float)
+    def get_spo2(self) -> float:
+        if self.count < self.window * 0.10:
+            return 0.0
+        
+        red = numpy.array(self._valid_red(), dtype=float)
+        ir = numpy.array(self._valid_ir(), dtype=float)
 
         # DC component = moving average (baseline)
         red_dc = numpy.mean(red)
