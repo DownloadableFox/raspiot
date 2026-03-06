@@ -26,7 +26,7 @@ def loop():
         driver.print((0, 0), "Not connected")
     
     driver.flush()
-    time.sleep(5)
+    time.sleep(1)
 
 if __name__ == "__main__":
     setup()

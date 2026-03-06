@@ -13,7 +13,7 @@ def init():
     global _i2c, _oled, _image, _font
     _i2c = busio.I2C(board.SCL, board.SDA)
     _oled = adafruit_ssd1306.SSD1306_I2C(128, 32, _i2c)
-    _font = ImageFont.load_default(size=20)
+    _font = ImageFont.load_default(size=14)
 
 def clear():
     global _oled, _image, _canvas
