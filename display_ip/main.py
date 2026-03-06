@@ -25,8 +25,8 @@ def loop():
     else:
         print("Not connected")
     
-    time.sleep(5000)
+    time.sleep(5)
 
-if __name__ == "__init__":
+if __name__ == "__main__":
     setup()
     while True: loop()
