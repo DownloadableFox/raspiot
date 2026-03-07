@@ -32,6 +32,8 @@ def loop():
     print(f"Gyroscope: [{dx}, {dy}, {dz}] rad/s")
     print("----")
 
+    time.sleep(0.25)
+
 def cleanup():
     # Cleanly shuts down all sensors.
     i2c_manager.close() 
