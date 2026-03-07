@@ -1,6 +1,7 @@
 import drivers
 import time
 import sys
+import math
 
 LINES = 9  # number of printed lines
 
@@ -26,6 +27,10 @@ def loop():
     gx, gy, gz = imu_sensor.get_g_force()
     dx, dy, dz = imu_sensor.get_degrees()
 
+    dx *= 180.0 / math.PI
+    dy *= 180.0 / math.PI
+    dz *= 180.0 / math.PI
+
     output = [
         "Heart Monitor:",
         f"Attached: {heart_monitor.is_attached()}",
@@ -48,7 +53,7 @@ def loop():
     sys.stdout.flush()
 
     time.sleep(0.05)
-    
+
 def cleanup():
     # Cleanly shuts down all sensors.
     i2c_manager.close() 
