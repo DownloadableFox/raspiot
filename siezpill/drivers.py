@@ -1,10 +1,11 @@
-import max30102
 import numpy
 from typing import Protocol
+from i2c import max30102, adxl345, itg3205
 
 class I2CDevice(Protocol):
     def setup(self) -> None: ...
     def update(self) -> None: ...
+    def close(self) -> None: ...
 
 class I2CManager():
     def __init__(self) -> None:
@@ -30,12 +31,16 @@ class I2CManager():
         for device in self.devices:
             device.update()
 
+    def close(self) -> None:
+        for device in self.devices:
+            device.close()
+
 class HeartMonitor(Protocol):
     def is_attached(self) -> bool: ...
     def get_heart_rate(self) -> int: ...
     def get_spo2(self) -> float: ...
 
-class Max30102HeartMonitor():
+class Max30102HeartMonitor:
     # If the sensor isn't attached, the IR reading should
     # be below this threshold.
     ATTACHED_IR_THRESHOLD: int  = 50_000
@@ -69,6 +74,9 @@ class Max30102HeartMonitor():
             self.pointer = (self.pointer + 1) % self.window
             self.count = min(self.count + 1, self.window)
     
+    def close(self) -> None:
+        pass # No close needed
+
     def _valid_samples(self) -> tuple[list[int], list[int]]:
         if self.count < self.window:
             return self.red_sample[:self.count], self.ir_sample[:self.count]
@@ -99,11 +107,10 @@ class Max30102HeartMonitor():
         # Remove DC component
         ir = ir - numpy.mean(ir)
 
-        # Smoothing: wider kernel (size ~sample_rate/10) handles 100 Hz better than fixed 5
         kernel_size = max(5, self.sample_rate // 10)
         if kernel_size % 2 == 0:
             kernel_size += 1  # Keep odd for symmetric smoothing
-            
+
         kernel = numpy.ones(kernel_size) / kernel_size
         ir = numpy.convolve(ir, kernel, mode="same")
 
@@ -167,3 +174,28 @@ class Max30102HeartMonitor():
         spo2 = 110.0 - 25.0 * r
 
         return round(min(100.0, max(0.0, spo2)), 1)
+
+class IntertiaSensor(Protocol):
+    def get_g_force(self) -> tuple[int, int, int]: ...
+    def get_degrees(self) -> tuple[int, int, int]: ...
+
+class GY85InertiaSensor:
+    def __init__(self, channel = 1, accelerometer_address = 0x53, gyroscope_address = 0x68):
+        self.accelerometer = adxl345.ADXL345(channel, accelerometer_address)
+        self.gyroscope = itg3205.ITG3205(channel, gyroscope_address)
+
+    def setup(self) -> None:
+        pass # Not needed
+
+    def update(self) -> None:
+        pass # Not needed
+
+    def close(self) -> None:
+        self.accelerometer.close()
+        self.gyroscope.close()
+
+    def get_g_force(self) -> tuple[int, int, int]: 
+        return self.accelerometer.read_g()
+    
+    def get_degrees(self) -> tuple[int, int, int]:
+        return self.gyroscope.read_dps()
