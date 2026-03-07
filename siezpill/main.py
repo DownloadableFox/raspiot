@@ -27,10 +27,6 @@ def loop():
     gx, gy, gz = imu_sensor.get_g_force()
     dx, dy, dz = imu_sensor.get_degrees()
 
-    dx *= 180.0 / math.pi
-    dy *= 180.0 / math.pi
-    dz *= 180.0 / math.pi
-
     output = [
         "Heart Monitor:",
         f"Attached: {heart_monitor.is_attached()}",
