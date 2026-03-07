@@ -49,7 +49,7 @@ class Max30102HeartMonitor:
     # attached or not.
     ATTACHED_IR_PERCENTILE: int = 10
 
-    def __init__(self, window: int = 100, sample_rate = 100, channel: int = 1, address: int = 0x57) -> None:
+    def __init__(self, window: int = 500, sample_rate = 100, channel: int = 1, address: int = 0x57) -> None:
         self.sensor = max30102.MAX30102(channel, address)
         self.window = window
         self.sample_rate = sample_rate
@@ -98,8 +98,8 @@ class Max30102HeartMonitor:
         reading = numpy.percentile(self._valid_ir(), self.ATTACHED_IR_PERCENTILE)
         return bool(reading > self.ATTACHED_IR_THRESHOLD)
         
-    def get_heart_rate(self) -> int: 
-        if self.count < 30:
+    def get_heart_rate(self) -> int:
+        if self.count < self.window // 2:
             return 0
 
         ir = numpy.array(self._valid_ir(), dtype=float)
@@ -107,15 +107,17 @@ class Max30102HeartMonitor:
         # Remove DC component
         ir = ir - numpy.mean(ir)
 
-        kernel_size = max(5, self.sample_rate // 10)
+        # Larger kernel (~200ms) to better preserve the PPG pulse shape
+        kernel_size = max(11, self.sample_rate // 5)
         if kernel_size % 2 == 0:
-            kernel_size += 1  # Keep odd for symmetric smoothing
+            kernel_size += 1
 
         kernel = numpy.ones(kernel_size) / kernel_size
-        ir = numpy.convolve(ir, kernel, mode="same")
+        # mode="valid" avoids zero-padding artifacts at buffer edges
+        ir = numpy.convolve(ir, kernel, mode="valid")
 
-        # Dynamic threshold: only keep strong peaks
-        threshold = numpy.mean(ir) + 0.5 * numpy.std(ir)
+        # Threshold relative to positive signal only, more robust against noise
+        threshold = numpy.mean(ir[ir > 0]) * 0.6 if numpy.any(ir > 0) else 0.0
 
         peaks: list[int] = []
         min_distance = int(self.sample_rate * 0.4)  # max ~150 BPM
