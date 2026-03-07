@@ -27,9 +27,9 @@ def loop():
     gx, gy, gz = imu_sensor.get_g_force()
     dx, dy, dz = imu_sensor.get_degrees()
 
-    dx *= 180.0 / math.PI
-    dy *= 180.0 / math.PI
-    dz *= 180.0 / math.PI
+    dx *= 180.0 / math.pi
+    dy *= 180.0 / math.pi
+    dz *= 180.0 / math.pi
 
     output = [
         "Heart Monitor:",
@@ -39,7 +39,7 @@ def loop():
         "----",
         "IMU Sensor:",
         f"Acceleration: [{gx:.3f}, {gy:.3f}, {gz:.3f}] g",
-        f"Gyroscope: [{dx:.3f}, {dy:.3f}, {dz:.3f}] rad/s",
+        f"Gyroscope: [{dx:.3f}, {dy:.3f}, {dz:.3f}] deg/s",
         "----"
     ]
 
