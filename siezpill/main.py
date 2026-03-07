@@ -1,5 +1,8 @@
 import drivers
 import time
+import sys
+
+LINES = 9  # number of printed lines
 
 i2c_manager = drivers.I2CManager()
 heart_monitor: drivers.HeartMonitor = drivers.Max30102HeartMonitor()
@@ -15,25 +18,37 @@ def setup():
     i2c_manager.setup()
 
 def loop():
-    # All I2C devices are polled
-    i2c_manager.update()
+    global LINES
 
-    print("Heart Monitor:")
-    print("Attached:", heart_monitor.is_attached())
-    print("Oxygenation:", heart_monitor.get_spo2(), "%")
-    print("Heart rate:", heart_monitor.get_heart_rate(), "bps")
-    print("----")
+    # I2C devices are polled
+    i2c_manager.update()
 
     gx, gy, gz = imu_sensor.get_g_force()
     dx, dy, dz = imu_sensor.get_degrees()
 
-    print("IMU Sensor:")
-    print(f"Acceleration: [{gx}, {gy}, {gz}] g")
-    print(f"Gyroscope: [{dx}, {dy}, {dz}] rad/s")
-    print("----")
+    output = [
+        "Heart Monitor:",
+        f"Attached: {heart_monitor.is_attached()}",
+        f"Oxygenation: {heart_monitor.get_spo2()} %",
+        f"Heart rate: {heart_monitor.get_heart_rate()} bps",
+        "----",
+        "IMU Sensor:",
+        f"Acceleration: [{gx:.3f}, {gy:.3f}, {gz:.3f}] g",
+        f"Gyroscope: [{dx:.3f}, {dy:.3f}, {dz:.3f}] rad/s",
+        "----"
+    ]
 
-    time.sleep(0.25)
+    # Move cursor up
+    sys.stdout.write(f"\033[{LINES}A")
 
+    for line in output:
+        sys.stdout.write("\033[2K")  # clear line
+        sys.stdout.write(line + "\n")
+
+    sys.stdout.flush()
+
+    time.sleep(0.05)
+    
 def cleanup():
     # Cleanly shuts down all sensors.
     i2c_manager.close() 
