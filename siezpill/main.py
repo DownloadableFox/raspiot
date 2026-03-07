@@ -60,6 +60,5 @@ if __name__ == "__main__":
     # TODO: Replace this with a SIGINT handler
     while True: 
         loop()
-        time.sleep(0.05)
     
     cleanup()
