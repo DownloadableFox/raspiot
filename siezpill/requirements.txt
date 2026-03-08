@@ -3,4 +3,4 @@ numpy
 pyqtgraph
 PyQt6
 heartpy
-setuptools
+setuptools<82

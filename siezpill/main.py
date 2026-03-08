@@ -1,7 +1,6 @@
 import drivers
 import time
 import sys
-import math
 
 LINES = 9  # number of printed lines
 
