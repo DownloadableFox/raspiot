@@ -1,4 +1,6 @@
+import time
 import numpy
+import heartpy as hp
 from typing import Protocol
 from i2c import max30102, adxl345, itg3205
 
@@ -39,143 +41,185 @@ class HeartMonitor(Protocol):
     def is_attached(self) -> bool: ...
     def get_heart_rate(self) -> int: ...
     def get_spo2(self) -> float: ...
-
+    def get_latest_ir(self) -> int: ...
+    def get_latest_red(self) -> int: ...
 class Max30102HeartMonitor:
     # If the sensor isn't attached, the IR reading should
     # be below this threshold.
-    ATTACHED_IR_THRESHOLD: int  = 50_000
+    ATTACHED_IR_THRESHOLD: int = 50_000
 
     # The percentile used to detect if the sensor is
     # attached or not.
     ATTACHED_IR_PERCENTILE: int = 10
 
-    def __init__(self, window: int = 500, sample_rate = 100, channel: int = 1, address: int = 0x57) -> None:
+    def __init__(
+        self,
+        window: int = 500,
+        sample_rate: int = 100,
+        channel: int = 1,
+        address: int = 0x57,
+        bpm_history_size: int = 5,
+    ) -> None:
         self.sensor = max30102.MAX30102(channel, address)
         self.window = window
         self.sample_rate = sample_rate
 
-        # Samples are buffers for red and ir light readings,
-        # they are written to using a pointer to optimize memory allocations.
-        self.red_sample = [0] * window
-        self.ir_sample = [0] * window
-        self.pointer = 0
-        self.count = 0
-    
+        # Plain growing/shrinking arrays
+        self.red_samples: list[int] = []
+        self.ir_samples: list[int] = []
+
+        # Small history to stabilize BPM output
+        self.bpm_history: list[float] = []
+        self.bpm_history_size = bpm_history_size
+        self.last_bpm_time: float = 0.0
+        self.last_bpm: int = 0
+
     def setup(self) -> None:
-        pass # No setup needed
+        pass  # No setup needed
 
     def update(self) -> None:
         sample_count = self.sensor.get_data_present()
 
         for _ in range(sample_count):
             red, ir = self.sensor.read_fifo()
-            self.red_sample[self.pointer] = red
-            self.ir_sample[self.pointer] = ir
-            self.pointer = (self.pointer + 1) % self.window
-            self.count = min(self.count + 1, self.window)
-    
-    def close(self) -> None:
-        pass # No close needed
 
-    def _valid_samples(self) -> tuple[list[int], list[int]]:
-        if self.count < self.window:
-            return self.red_sample[:self.count], self.ir_sample[:self.count]
-        else:
-            red = self.red_sample[self.pointer:] + self.red_sample[:self.pointer]
-            ir  = self.ir_sample[self.pointer:]  + self.ir_sample[:self.pointer]
-            return red, ir
+            self.red_samples.append(red)
+            self.ir_samples.append(ir)
+
+            if len(self.red_samples) > self.window:
+                self.red_samples.pop(0)
+
+            if len(self.ir_samples) > self.window:
+                self.ir_samples.pop(0)
+
+    def close(self) -> None:
+        pass  # No close needed
 
     def _valid_red(self) -> list[int]:
-        return self._valid_samples()[0]
+        return self.red_samples
 
     def _valid_ir(self) -> list[int]:
-        return self._valid_samples()[1]
+        return self.ir_samples
 
     def is_attached(self) -> bool:
-        if self.count < self.window * 0.10:
+        if len(self.ir_samples) < max(10, int(self.window * 0.10)):
             return False
-        
-        reading = numpy.percentile(self._valid_ir(), self.ATTACHED_IR_PERCENTILE)
+
+        reading = numpy.percentile(self.ir_samples, self.ATTACHED_IR_PERCENTILE)
         return bool(reading > self.ATTACHED_IR_THRESHOLD)
-        
+
+    def _push_bpm_history(self, bpm: float) -> None:
+        self.bpm_history.append(bpm)
+        if len(self.bpm_history) > self.bpm_history_size:
+            self.bpm_history.pop(0)
+
+    def _smoothed_bpm(self) -> int:
+        if not self.bpm_history:
+            return 0
+        return int(round(float(numpy.mean(self.bpm_history))))
+
     def get_heart_rate(self) -> int:
-        if self.count < self.window // 2:
+        if not self.is_attached():
+            self.bpm_history.clear()
+            self.last_bpm = 0
             return 0
 
-        ir = numpy.array(self._valid_ir(), dtype=float)
+        # HeartPy usually works better with a few seconds of data
+        min_samples = max(self.sample_rate * 4, self.window // 2)
+        if len(self.ir_samples) < min_samples:
+            return self.last_bpm
 
-        # Remove DC component
+        ir = numpy.array(self.ir_samples, dtype=float)
+
+        # Remove baseline / DC component
         ir = ir - numpy.mean(ir)
 
-        # Larger kernel (~200ms) to better preserve the PPG pulse shape
-        kernel_size = max(11, self.sample_rate // 5)
+        # Optional light smoothing before HeartPy
+        kernel_size = max(3, self.sample_rate // 12)
         if kernel_size % 2 == 0:
             kernel_size += 1
 
-        kernel = numpy.ones(kernel_size) / kernel_size
-        # mode="valid" avoids zero-padding artifacts at buffer edges
-        ir = numpy.convolve(ir, kernel, mode="valid")
+        if kernel_size > 1 and len(ir) >= kernel_size:
+            kernel = numpy.ones(kernel_size) / kernel_size
+            ir = numpy.convolve(ir, kernel, mode="same")
 
-        # Threshold relative to positive signal only, more robust against noise
-        threshold = numpy.mean(ir[ir > 0]) * 0.6 if numpy.any(ir > 0) else 0.0
+        try:
+            wd, measures = hp.process(
+                ir,
+                sample_rate=self.sample_rate,
+                bpmmin=40,
+                bpmmax=180,
+                clean_rr=True,
+                clean_rr_method="quotient-filter",
+            )
 
-        peaks: list[int] = []
-        min_distance = int(self.sample_rate * 0.4)  # max ~150 BPM
+            bpm = float(measures["bpm"])
 
-        for i in range(1, len(ir) - 1):
-            is_peak = ir[i] > ir[i - 1] and ir[i] > ir[i + 1]
-            strong_enough = ir[i] > threshold
-            far_enough = not peaks or (i - peaks[-1]) >= min_distance
+            if numpy.isnan(bpm) or bpm < 30 or bpm > 220:
+                return self.last_bpm
 
-            if is_peak and strong_enough and far_enough:
-                peaks.append(i)
+            # Only update history if enough time has passed or it is the first valid reading
+            now = time.time()
+            if self.last_bpm_time == 0.0 or (now - self.last_bpm_time) >= 0.5:
+                self._push_bpm_history(bpm)
+                self.last_bpm_time = now
+                self.last_bpm = self._smoothed_bpm()
 
-        if len(peaks) < 2:
-            return 0
+            return self.last_bpm
 
-        intervals = numpy.diff(peaks) / self.sample_rate
-        mean_interval = numpy.mean(intervals)
-
-        if mean_interval <= 0:
-            return 0
-
-        bpm = 60.0 / mean_interval
-
-        # Sanity filter
-        if bpm < 30 or bpm > 220:
-            return 0
-
-        return int(round(bpm))
+        except Exception:
+            return self.last_bpm
 
     def get_spo2(self) -> float:
-        if self.count < self.window * 0.10:
+        if not self.is_attached():
             return 0.0
-        
-        red = numpy.array(self._valid_red(), dtype=float)
-        ir = numpy.array(self._valid_ir(), dtype=float)
 
-        # DC component = mean baseline
+        min_samples = max(self.sample_rate * 3, int(self.window * 0.10))
+        if len(self.red_samples) < min_samples or len(self.ir_samples) < min_samples:
+            return 0.0
+
+        red = numpy.array(self.red_samples, dtype=float)
+        ir = numpy.array(self.ir_samples, dtype=float)
+
         red_dc = numpy.mean(red)
         ir_dc = numpy.mean(ir)
 
-        if red_dc == 0 or ir_dc == 0:
+        if red_dc <= 0 or ir_dc <= 0:
             return 0.0
 
-        # AC component = peak-to-peak amplitude of the pulsatile signal,
-        # not std dev — std dev underestimates the true AC swing.
-        red_ac = numpy.max(red) - numpy.min(red)
-        ir_ac  = numpy.max(ir)  - numpy.min(ir)
+        # Remove slow baseline first so AC uses pulsatile content
+        red_baseline = numpy.convolve(
+            red, numpy.ones(max(3, self.sample_rate // 2)) / max(3, self.sample_rate // 2), mode="same"
+        )
+        ir_baseline = numpy.convolve(
+            ir, numpy.ones(max(3, self.sample_rate // 2)) / max(3, self.sample_rate // 2), mode="same"
+        )
 
-        if ir_ac == 0:
+        red_ac_wave = red - red_baseline
+        ir_ac_wave = ir - ir_baseline
+
+        # RMS of AC component is usually more stable than raw peak-to-peak
+        red_ac = numpy.sqrt(numpy.mean(red_ac_wave ** 2))
+        ir_ac = numpy.sqrt(numpy.mean(ir_ac_wave ** 2))
+
+        if red_ac <= 0 or ir_ac <= 0:
             return 0.0
 
-        # Ratio of ratios
         r = (red_ac / red_dc) / (ir_ac / ir_dc)
-
-        # Empirical formula (standard approximation)
         spo2 = 110.0 - 25.0 * r
 
         return round(min(100.0, max(0.0, spo2)), 1)
+
+    def get_latest_ir(self) -> int:
+        if not self.ir_samples:
+            return 0
+        return self.ir_samples[-1]
+
+    def get_latest_red(self) -> int:
+        if not self.red_samples:
+            return 0
+        return self.red_samples[-1]
+
 
 class IntertiaSensor(Protocol):
     def get_g_force(self) -> tuple[int, int, int]: ...

@@ -1,0 +1,266 @@
+@startuml
+title SELLO LEGÍTIMO - Arquitectura de Alto Nivel
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+skinparam linetype ortho
+
+skinparam package {
+  BackgroundColor #F8F9FA
+  BorderColor #2F4F4F
+}
+
+skinparam component {
+  BackgroundColor #FFFFFF
+  BorderColor #2F4F4F
+}
+
+skinparam database {
+  BackgroundColor #FFF8DC
+  BorderColor #8B7D6B
+}
+
+skinparam cloud {
+  BackgroundColor #F0F8FF
+  BorderColor #4682B4
+}
+
+skinparam node {
+  BackgroundColor #F5FFFA
+  BorderColor #2E8B57
+}
+
+actor "Superadministrador" as Superadmin
+actor "Administrador RNEC" as AdminRNEC
+actor "Jurado 1\nGestor de Identidad" as Jurado1
+actor "Jurado 2\nCustodio de Flujo" as Jurado2
+actor "Jurado 3\nNotario de Urna" as Jurado3
+actor "Delegado CNE" as CNE
+actor "Auditor / MOE" as Auditor
+actor "Ciudadano / Votante" as Votante
+actor "Partido / Candidato / Testigo" as Partido
+
+cloud "Fuentes externas" as Ext {
+  component "RNEC / Censo base" as RNECBase
+  component "Biometría facial / huella" as BioExt
+  component "Procuraduría / CNE\nValidación de inhabilidades" as ValidacionExt
+  component "Autoridad certificadora /\nTimestamp" as TSA
+  component "Correo / OTP / Notificaciones" as MailOtp
+}
+
+package "Canales de acceso" {
+  component "Portal Ciudadano Público\n(M11)" as Portal
+  component "Plataforma de Voto Remoto\n(Web / Móvil)" as VotoRemoto
+  component "Consola Administrativa" as AdminUI
+  component "Dashboards por rol\n(M7)" as Dashboards
+}
+
+node "Puesto de votación\nNodo autónomo offline-capable" as Puesto {
+  node "Mesa electoral" as Mesa {
+    component "Terminal de Jurado (TJ)\n- autenticación\n- consulta censo\n- emisión Handshake\n- excepciones E-12" as TJ
+
+    component "Terminal de Votante (TV)\nSandbox Stateless\n- tarjetón\n- captura voto\n- confirmación\n- impresión VVPAT" as TV
+
+    component "Terminal / módulo de\nNotario de Urna" as TNU
+    component "Urna física\n(VVPAT)" as UrnaFisica
+
+    database "Censo local de mesa" as CensoLocal
+    database "Registro local de autenticación" as AuthLocal
+    database "Urna digital local" as UrnaLocal
+    database "Log local inmutable" as LogLocal
+    component "Módulo offline /\nSincronización eventual" as SyncLocal
+  }
+
+  component "Servidor de Puesto" as ServPuesto
+}
+
+node "Servidor Municipal" as ServMunicipal
+node "Servidor Departamental" as ServDepto
+node "Servidor Nacional" as ServNacional
+
+package "Back-end central del sistema" {
+  component "M1 Configuración de Elección" as M1
+  component "M2 Gestión Pre-electoral" as M2
+  component "M3 Autenticación del Votante" as M3
+  component "M4 Votación\n(Presencial y Remota)" as M4
+  component "M5 Custodia del Voto Remoto" as M5
+  component "M6 Escrutinio y Conteo" as M6
+  component "M7 Resultados y Reportes" as M7
+  component "M8 Auditoría y Trazabilidad" as M8
+  component "M10 Gestión de Usuarios y Roles" as M10
+}
+
+package "Motor Electoral Plug-in" {
+  interface "IElectoralMethod" as IMethod
+  component "ME-01\nMayoría Simple" as ME1
+  component "ME-02\nMayoría Absoluta\n+ Segunda Vuelta" as ME2
+  component "ME-03\nCifra Repartidora\ncon Umbral" as ME3
+  component "ME-04\nVoto Alternativo" as ME4
+}
+
+database "BD Identidad / Censo\n(separada del voto)" as BDIdentidad
+database "BD Electoral Central\n(configuración, actas,\nreportes, dashboards)" as BDElectoral
+database "Custodia de Voto Remoto\n(cifrada / sellada)" as BDCustodia
+database "Repositorio de Actas\ninmutables + hashes" as BDActas
+database "Log Global Inmutable" as BDLog
+
+cloud "Transparencia y publicación" as Transparencia {
+  component "Publicación de actas E-14 / E-24 / E-26" as PublicacionActas
+  component "Consulta de estado del voto\npor número de confirmación" as EstadoVoto
+  component "Resultados preliminares /\noficiales" as ResultadosPub
+  component "Reclamaciones públicas" as Reclamaciones
+}
+
+' Actores
+Superadmin --> AdminUI
+AdminRNEC --> AdminUI
+CNE --> Dashboards
+Auditor --> Dashboards
+Partido --> Dashboards
+Votante --> Portal
+Votante --> VotoRemoto
+Jurado1 --> TJ
+Jurado2 --> TV
+Jurado3 --> TNU
+
+' Consola y administración
+AdminUI --> M1
+AdminUI --> M2
+AdminUI --> M10
+AdminUI --> M7
+
+M1 --> IMethod
+ME1 -up-|> IMethod
+ME2 -up-|> IMethod
+ME3 -up-|> IMethod
+ME4 -up-|> IMethod
+
+M1 --> BDElectoral
+M2 --> BDIdentidad
+M2 --> BDElectoral
+M10 --> BDElectoral
+M10 --> BDLog
+
+' Integraciones externas
+M2 --> ValidacionExt
+M3 --> BioExt
+M3 --> RNECBase
+M5 --> TSA
+M4 --> MailOtp
+M3 --> MailOtp
+
+' Flujo presencial
+TJ --> CensoLocal
+TJ --> AuthLocal
+TJ --> LogLocal
+TJ --> BDIdentidad : consulta identidad /\nvalidación de elegibilidad
+TJ --> TV : Handshake cifrado\n(solo permisos,\nsin identidad)
+note on link
+  Separación identidad-voto.
+  No se comparte BD local
+  entre TJ y TV.
+end note
+
+TV --> UrnaLocal : voto cifrado
+TV --> UrnaFisica : imprime VVPAT
+TNU --> UrnaLocal : confirma depósito físico
+TNU --> LogLocal
+UrnaFisica --> TNU : comprobante depositado
+SyncLocal --> ServPuesto
+TJ --> SyncLocal
+TV --> SyncLocal
+TNU --> SyncLocal
+LogLocal --> SyncLocal
+UrnaLocal --> SyncLocal
+AuthLocal --> SyncLocal
+CensoLocal --> SyncLocal
+
+' Flujo remoto
+VotoRemoto --> M3 : autenticación remota\n(documento + OTP + facial)
+VotoRemoto --> M4 : emisión de voto remoto
+M4 --> BDCustodia : voto cifrado\nestado "custodiado"
+M4 --> MailOtp : confirmación /\ncomprobante /\nOTP
+Portal --> EstadoVoto
+EstadoVoto --> BDCustodia
+
+' Custodia
+M5 --> BDCustodia
+M5 --> BDLog
+CNE --> M5 : multifirma
+Superadmin --> M5 : multifirma
+Auditor --> M5 : multifirma
+
+' Escrutinio y doble verdad
+ServPuesto --> M6
+M6 --> UrnaLocal : verdad digital
+TNU --> M6 : escaneo QR físico
+M6 --> BDActas : genera E-14
+M6 --> BDLog : trazabilidad /\ndiscrepancias
+M6 --> IMethod : aplica método electoral
+M6 --> ServMunicipal : consolidación mesa
+ServMunicipal --> ServDepto
+ServDepto --> ServNacional
+ServNacional --> M6
+
+' Reportes y publicación
+M7 --> BDElectoral
+M7 --> BDActas
+M7 --> BDLog
+M7 --> PublicacionActas
+M7 --> ResultadosPub
+M8 --> BDLog
+M8 --> BDActas
+M8 --> PublicacionActas
+M8 --> Reclamaciones
+
+Portal --> ResultadosPub
+Portal --> PublicacionActas
+Portal --> Reclamaciones
+Dashboards --> M7
+Dashboards --> M8
+
+' Repositorios centrales
+M3 --> BDIdentidad
+M4 --> BDElectoral
+M5 --> BDElectoral
+M6 --> BDElectoral
+M8 --> BDElectoral
+
+' Jerarquía distribuida
+ServPuesto --> ServMunicipal : sincronización eventual
+ServMunicipal --> ServDepto : consolidación
+ServDepto --> ServNacional : consolidación
+
+note bottom of Puesto
+  Nodo autónomo:
+  - opera offline
+  - almacena censo local,
+    autenticaciones, urna local y log
+  - sincroniza al recuperar conectividad
+end note
+
+note bottom of M6
+  Escrutinio de "Doble Verdad":
+  1) total digital
+  2) conteo físico / QR
+  3) conciliación
+  4) generación E-14
+end note
+
+note right of BDCustodia
+  Votos remotos sellados
+  y no contabilizados
+  hasta apertura autorizada.
+end note
+
+note right of BDLog
+  Log inmutable global:
+  Handshake, autenticación,
+  voto, escrutinio,
+  reclamaciones y custodia.
+end note
+
+@enduml
