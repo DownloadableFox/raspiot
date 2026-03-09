@@ -1,6 +1,5 @@
 smbus2
 numpy
-pyqtgraph
-PyQt6
 heartpy
 setuptools<82
+websockets
