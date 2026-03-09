@@ -47,6 +47,8 @@ def read_sensor_data() -> dict:
             "attached": heart_monitor.is_attached(),
             "spo2": heart_monitor.get_spo2(),
             "heart_rate": heart_monitor.get_heart_rate(),
+            "latest_ir": heart_monitor.get_latest_ir(),
+            "latest_red": heart_monitor.get_latest_red(),
         },
         "imu_sensor": {
             "acceleration_g": {

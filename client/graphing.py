@@ -8,7 +8,7 @@ import websockets
 from pyqtgraph.Qt import QtCore, QtWidgets
 
 
-WS_URL = "ws://127.0.0.1:8765"
+WS_URL = "ws://10.107.210.251:8765"
 
 app = QtWidgets.QApplication(sys.argv)
 
